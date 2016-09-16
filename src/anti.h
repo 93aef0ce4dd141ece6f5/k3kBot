@@ -2,10 +2,10 @@
 #ifndef ANTI_H
 #define ANTI_H
 
-//#define ANTI_VIRTUALIZATION
+#define ANTI_VIRTUALIZATION
 #define ANTI_VIRTUAL_MACHINE
-#define ANTI_SANDBOX
-//#define ANTI_DEBUGGING
+//#define ANTI_SANDBOX
+#define ANTI_DEBUGGING
 
 #define FIND_WINDOW_NAMES
 

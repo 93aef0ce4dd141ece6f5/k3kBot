@@ -25,6 +25,20 @@
 #include "anti.h"
 #include "helper.h"
 
+BOOL IsAdmin() {
+	BOOL bRet;
+	SID_IDENTIFIER_AUTHORITY NtAuthority = SECURITY_NT_AUTHORITY;
+	PSID AdministratorsGroup;
+	bRet = AllocateAndInitializeSid(&NtAuthority, 2, SECURITY_BUILTIN_DOMAIN_RID, DOMAIN_ALIAS_RID_ADMINS,
+									0, 0, 0, 0, 0, 0, &AdministratorsGroup);
+	if (bRet)
+		if (CheckTokenMembership(NULL, AdministratorsGroup, &bRet) == FALSE)
+			bRet = FALSE;
+
+	FreeSid(AdministratorsGroup);
+	return bRet;
+}
+
 int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
 	CreateMutex(NULL, TRUE, NAME);
 	if (GetLastError() == ERROR_ALREADY_EXISTS)
@@ -41,8 +55,12 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
 #endif
 
 	// get version info
+	if (IsAdmin() == TRUE)
+		Debug("I am admin");
 
-	Debug("Hello");
+	BOOL bIs64Bit = FALSE;
+	if (IsWow64Process(GetCurrentProcess(), &bIs64Bit) == TRUE)
+		bIs64Bit ? Debug("64-bit") : Debug("32-bit");
 
 	return 0;
 }

@@ -64,7 +64,6 @@ LPCSTR MonitoringToolNames[] = {
 
 /* Artefacts for virtualization */
 LPCSTR VMRegistryKeys[] = {
-	//"SOFTWARE",						/* check for VMware Inc.*/
 	"SYSTEM\\CurrentControlSet\\Enum\\SCSI\\Disk&Ven_VMware_&Prod_VMware_Virtual_S",
 	"SYSTEM\\CurrentControlSet\\CriticalDeviceDatabase\\root#vmwvmchihostdev",
 	"SYSTEM\\CurrentControlSet\\Control\\VirtualDeviceDrivers"
@@ -91,7 +90,6 @@ LPCSTR VMProcessNames[] = {
 
 LPCSTR VMSys32FileNames[] = {
 	/* VMware */
-	"driversvmhgfs.dll", // confirm this
 	"vm3dgl.dll",
 	"vmdum.dll",
 	"vm3dver.dll",
@@ -194,10 +192,10 @@ static BOOL CheckVMProcessNames(VOID) {
 }
 
 /*
-* Enumerates VMWindowNames array and tests if
-* there exists a window with the same name.
-* Check if working!
-*/
+ * Enumerates VMWindowNames array and tests if
+ * there exists a window with the same name.
+ * Check if working!
+ */
 static BOOL CheckVMWindowNames(VOID) {
 	for (int i = 0; i < 5; i++) {
 		if (FindWindow(VMWindowNames[i], NULL) != NULL)
@@ -238,10 +236,10 @@ static BOOL CheckVMFiles(VOID) {
 }
 
 /*
-* Enumerates all services and checks them against
-* the VMServicesNames array defined above. Returns
-* true if there is a match, else FALSE.
-*/
+ * Enumerates all services and checks them against
+ * the VMServicesNames array defined above. Returns
+ * true if there is a match, else FALSE.
+ */
 static BOOL CheckVMServices(VOID) {
 	SC_HANDLE hSCManager = OpenSCManager(NULL, NULL, SC_MANAGER_ENUMERATE_SERVICE);
 	if (hSCManager == NULL) {
@@ -292,11 +290,11 @@ static BOOL CheckVMServices(VOID) {
 }
 
 /*
-* CPUID called with eax = 1 retrieves
-* processor information. The 31st bit in
-* ecx contains the value of the hypervisor
-* which is always 0 on a real CPU.
-*/
+ * CPUID called with eax = 1 retrieves
+ * processor information. The 31st bit in
+ * ecx contains the value of the hypervisor
+ * which is always 0 on a real CPU.
+ */
 static BOOL CheckHypervisor(VOID) {
 	BOOL bResult = FALSE;
 

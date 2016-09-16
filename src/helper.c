@@ -2,6 +2,7 @@
 #include <stdarg.h>
 #include <Windows.h>
 
+#include "main.h"
 #include "helper.h"
 
 VOID Debug(LPCSTR fmt, ...) {
