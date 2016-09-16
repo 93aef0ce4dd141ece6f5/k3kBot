@@ -2,28 +2,28 @@
 // http://www.symantec.com/connect/articles/windows-anti-debug-reference
 
 /******************************************************************************
- *                                                                            *
- *                                                                            *
- *                                                                            *
- *                                                                            *
- *                                                                            *
- *                                                                            *
- *                                                                            *
- *                                                                            *
- *                                                                            *
- *                                                                            *
- *                                                                            *
- ******************************************************************************/
+*                                                                            *
+*                                                                            *
+*                                                                            *
+*                                                                            *
+*                                                                            *
+*                                                                            *
+*                                                                            *
+*                                                                            *
+*                                                                            *
+*                                                                            *
+*                                                                            *
+******************************************************************************/
 
 /*
-	Anti-sandboxing
-		- extended sleeping
-		- checking for inline hooks on API
-		- user interaction
-			- mouse events
-		- artefact checks
-		- stalling code (executing useless instructions to 
-		  emulate process execution
+Anti-sandboxing
+- extended sleeping
+- checking for inline hooks on API
+- user interaction
+- mouse events
+- artefact checks
+- stalling code (executing useless instructions to
+emulate process execution
 
 */
 
@@ -34,9 +34,13 @@
 #include <VersionHelpers.h>
 #include <Psapi.h>
 #include <TlHelp32.h>
+#include <winsvc.h>
+
+#pragma comment(lib, "Advapi32.lib")
 
 #include "main.h"
 #include "anti.h"
+#include "helper.h"
 
 /* Debuggers and Monitors */
 LPCSTR DebuggerNames[] = {
@@ -44,7 +48,7 @@ LPCSTR DebuggerNames[] = {
 	"ollydbg",
 	"ida",
 	"immunity",
-	"softice", 
+	"softice",
 	"radare",
 	"gdb"
 	/* needs more names */
@@ -66,6 +70,14 @@ LPCSTR VMRegistryKeys[] = {
 	"SYSTEM\\CurrentControlSet\\Control\\VirtualDeviceDrivers"
 };
 
+LPCSTR VMWindowNames[] = {
+	/* VMware */
+	"vmdisplaychangecontrolclass",
+	"vmwaredragdetwndclass",
+	"vmtoolsdcontrolwndclass",
+	"vmwaretrayicon"
+};
+
 LPCSTR VMProcessNames[] = {
 	/* VMware */
 	"vmtoolsd",
@@ -80,6 +92,14 @@ LPCSTR VMProcessNames[] = {
 LPCSTR VMSys32FileNames[] = {
 	/* VMware */
 	"driversvmhgfs.dll", // confirm this
+	"vm3dgl.dll",
+	"vmdum.dll",
+	"vm3dver.dll",
+	"vmtray.dll",
+	"vmtoolshook.dll",
+	"vmmousever.dll",
+	"vmhgfs.dll",
+	"vmguestlibjava.dll",
 	/* Virtual Box */
 	"vboxdisp.dll",
 	"vboxhook.dll",
@@ -99,14 +119,6 @@ LPCSTR VMSys32FileNames[] = {
 LPCSTR VMSys32DriversFileNames[] = {
 	/* VMware */
 	"vmmouse.sys",
-	"vm3dgl.dll",
-	"vmdum.dll",
-	"vm3dver.dll",
-	"vmtray.dll",
-	"vmtoolshook.dll",
-	"vmmousever.dll",
-	"vmhgfs.dll",
-	"vmguestlibjava.dll",
 	/* Virtual Box */
 	"vboxmouse.sys",
 	"vboxguest.sys",
@@ -131,19 +143,11 @@ LPCSTR VMServiceNames[] = {
 	"vmware physical disk helper service"
 };
 
-static VOID StringToLowerCase(LPSTR lpDest, LPCSTR lpSrc) {
-	strcpy(lpDest, lpSrc);
-
-	for (int i = 0; i < (int)strlen(lpSrc); i++)
-		if (lpSrc[i] >= 'A' && lpSrc[i] <= 'Z')
-			lpDest[i] = lpSrc[i] + 32;
-}
-
 /*
-	Enumerates all process names and checks them
-	against the pre-defined strings declared above.
-	If a process name contains one of the strings,
-	the process will abort.
+Enumerates all process names and checks them
+against the pre-defined strings declared above.
+If a process name contains one of the strings,
+the process will abort.
 */
 static DWORD CheckProcessName(LPSTR lpName, LPCSTR *lpArray, SIZE_T size) {
 	for (SIZE_T i = 0; i < size; i++)
@@ -153,6 +157,8 @@ static DWORD CheckProcessName(LPSTR lpName, LPCSTR *lpArray, SIZE_T size) {
 	return FALSE;
 }
 
+/* Detect VMs such as VMware and VBox */
+#ifdef ANTI_VIRTUAL_MACHINE
 static BOOL CheckVMProcessNames(VOID) {
 	HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
 	if (hSnapshot == INVALID_HANDLE_VALUE)
@@ -188,8 +194,22 @@ static BOOL CheckVMProcessNames(VOID) {
 }
 
 /*
-	Checks file artefacts in the System32 and 
-	System32\Drivers directory
+* Enumerates VMWindowNames array and tests if
+* there exists a window with the same name.
+* Check if working!
+*/
+static BOOL CheckVMWindowNames(VOID) {
+	for (int i = 0; i < 5; i++) {
+		if (FindWindow(VMWindowNames[i], NULL) != NULL)
+			return TRUE;
+	}
+
+	return FALSE;
+}
+
+/*
+Checks file artefacts in the System32 and
+System32\Drivers directory
 */
 static BOOL CheckVMFiles(VOID) {
 	CHAR szBaseDirectory[MAX_PATH];
@@ -197,19 +217,19 @@ static BOOL CheckVMFiles(VOID) {
 	GetSystemDirectory(szBaseDirectory, MAX_PATH);
 
 	/* VMSys32FileNames */
-	for (int i = 0; i < 14; i++) {
+	for (int i = 0; i < 22; i++) {
 		CHAR szFileName[MAX_PATH];
 		sprintf(szFileName, "%s\\%s", szBaseDirectory, VMSys32FileNames[i]);
-		//Debug("%s\n", szFileName);
+		Debug("%s\n", szFileName);
 		if (GetFileAttributes(szFileName) != INVALID_FILE_ATTRIBUTES)
 			return TRUE;
 	}
 
 	/* VMSys32DriversFileNames */
-	for (int i = 0; i < 13; i++) {
+	for (int i = 0; i < 5; i++) {
 		CHAR szDriverFileName[MAX_PATH];
-		sprintf(szDriverFileName, "%s\\%s\\%s", szBaseDirectory, "Drivers", VMSys32DriversFileNames[i]);
-		//Debug("%s\n", szDriverFileName);
+		sprintf(szDriverFileName, "%s\\%s\\%s", szBaseDirectory, "drivers", VMSys32DriversFileNames[i]);
+		Debug("%s\n", szDriverFileName);
 		if (GetFileAttributes(szDriverFileName) != INVALID_FILE_ATTRIBUTES)
 			return TRUE;
 	}
@@ -217,15 +237,110 @@ static BOOL CheckVMFiles(VOID) {
 	return FALSE;
 }
 
+/*
+* Enumerates all services and checks them against
+* the VMServicesNames array defined above. Returns
+* true if there is a match, else FALSE.
+*/
 static BOOL CheckVMServices(VOID) {
-	OpenSCManager();
+	SC_HANDLE hSCManager = OpenSCManager(NULL, NULL, SC_MANAGER_ENUMERATE_SERVICE);
+	if (hSCManager == NULL) {
+		Error("OpenSCManager");
+		return FALSE;
+	}
+
+	DWORD dwNumServices = 0;
+	DWORD dwServicesReturned = 0;
+	DWORD dwResumeHandle = 0;
+	BOOL bResult = EnumServicesStatus(hSCManager, SERVICE_DRIVER | SERVICE_FILE_SYSTEM_DRIVER | SERVICE_KERNEL_DRIVER | SERVICE_WIN32, SERVICE_STATE_ALL, NULL, 0, &dwNumServices, &dwServicesReturned, &dwResumeHandle);
+	if (bResult == FALSE && GetLastError() != ERROR_MORE_DATA) {
+		Error("EnumServicesStatus first call");
+		CloseServiceHandle(hSCManager);
+		return FALSE;
+	}
+
+	LPENUM_SERVICE_STATUS lpess = malloc(sizeof(ENUM_SERVICE_STATUS) * dwNumServices);
+	if (lpess == NULL) {
+		Error("Malloc ENUM_SERVICE_STATUS");
+		CloseServiceHandle(hSCManager);
+		return FALSE;
+	}
+	bResult = EnumServicesStatus(hSCManager, SERVICE_DRIVER | SERVICE_FILE_SYSTEM_DRIVER | SERVICE_KERNEL_DRIVER | SERVICE_WIN32, SERVICE_STATE_ALL, lpess, dwNumServices, &dwNumServices, &dwServicesReturned, NULL);
+	if (bResult == FALSE) {
+		Error("EnumServicesStatus second call");
+		free(lpess);
+		CloseServiceHandle(hSCManager);
+		return FALSE;
+	}
+
+	for (DWORD i = 0; i < dwNumServices; i++) {
+		CHAR szLowerCase[MAX_PATH];
+		StringToLowerCase(szLowerCase, lpess[i].lpServiceName);
+		for (int j = 0; j < 12; j++) {
+			if (strstr(szLowerCase, VMServiceNames[j]) != NULL) {
+				Debug("Found %s", lpess[i].lpServiceName);
+				free(lpess);
+				CloseServiceHandle(hSCManager);
+				return TRUE;
+			}
+		}
+	}
+
+	free(lpess);
+	CloseServiceHandle(hSCManager);
+	return FALSE;
 }
+
+/*
+* CPUID called with eax = 1 retrieves
+* processor information. The 31st bit in
+* ecx contains the value of the hypervisor
+* which is always 0 on a real CPU.
+*/
+static BOOL CheckHypervisor(VOID) {
+	BOOL bResult = FALSE;
+
+	__asm {
+		mov eax, 0x1
+		cpuid
+		and ecx, 0x1
+		cmp ecx, 0x1
+		jnz end
+		mov eax, 1
+		mov bResult, eax
+		end :
+	}
+
+	return bResult;
+}
+#endif
+
+/* Sandbox evasion */
+#ifdef ANTI_SANDBOX
+static VOID StallCode(VOID) {
+	// rep instruction 4 cycles
+}
+
+static VOID ExtendedSleep(VOID) {
+	Sleep(EXTENDED_SLEEP_TIME);
+}
+#endif
 
 #ifdef ANTI_VIRTUALIZATION
 BOOL CheckForVirtualization(VOID) {
-	CheckVMProcessNames();
-	CheckVMFiles();
-	CheckVMServices();
+	/* Anti-VM */
+#ifdef ANTI_VIRTUAL_MACHINE
+	//CheckVMProcessNames(); works
+	//CheckVMFiles(); works
+	//fix CheckVMServices();
+	//CheckVMWindowNames(); works
+	//CheckHypervisor(); works
+#endif
+
+	/* Anti-Sandbox */
+#ifdef ANTI_SANDBOX
+	ExtendedSleep();
+#endif
 
 	return FALSE;
 }
@@ -233,23 +348,23 @@ BOOL CheckForVirtualization(VOID) {
 
 #ifdef ANTI_DEBUGGING
 /*
-	PEB->BeingDebugged method (IsDebuggerPresent)
-	PEB->BeingDebugged will have value of 1 if
-	there is a debugger on the process
+PEB->BeingDebugged method (IsDebuggerPresent)
+PEB->BeingDebugged will have value of 1 if
+there is a debugger on the process
 
-	Note: PEB structure may change in the future
-	making it unreliable
+Note: PEB structure may change in the future
+making it unreliable
 */
 static BOOL MyIsDebuggerPresent(VOID) {
 	/*
 	BOOL bRet = FALSE;
 
-		PPEB peb = (PPEB)__readfsdword(0x30);
-		return peb->BeingDebugged;
+	PPEB peb = (PPEB)__readfsdword(0x30);
+	return peb->BeingDebugged;
 	__asm {
-		mov eax, fs:[0x30]
-		movzx eax, [eax + 0x2]
-		mov bRet, eax
+	mov eax, fs:[0x30]
+	movzx eax, [eax + 0x2]
+	mov bRet, eax
 	}
 	*/
 
@@ -257,31 +372,28 @@ static BOOL MyIsDebuggerPresent(VOID) {
 }
 
 /*
-	NtGlobalFlag method
-	If process is created by debugger, PEB +
-	offset 0x68 (32-bit) will have the value 0x70
+NtGlobalFlag method
+If process is created by debugger, PEB +
+offset 0x68 (32-bit) will have the value 0x70
 */
 static BOOL CheckNtGlobalFlag(VOID) {
 	DWORD dwFlag = 0;
 
 	/*
 	__asm {
-		mov eax, fs:[0x30]
-		mov eax, [eax + 0x68]
-		mov dwFlag, eax
+	mov eax, fs:[0x30]
+	mov eax, [eax + 0x68]
+	mov dwFlag, eax
 	}
 	*/
 	dwFlag = *(LPDWORD)(__readfsdword(0x30) + 0x68);
 
-/*
-	FLG_HEAP_ENABLE_TAIL_CHECK | 
-	FLG_HEAP_ENABLE_FREE_CHECK | 
+	/*
+	FLG_HEAP_ENABLE_TAIL_CHECK |
+	FLG_HEAP_ENABLE_FREE_CHECK |
 	FLG_HEAP_VALIDATE_PARAMETERS
-*/
-	if (dwFlag & 0x70)
-		return TRUE;
-
-	return FALSE;
+	*/
+	return dwFlag & 0x70 ? TRUE : FALSE;
 }
 
 // not working yet
@@ -298,17 +410,17 @@ static BOOL CheckHeapFlags(VOID) {
 }
 
 /*
-	NtQueryInformationProcess called with
-	ProcessDebugPort will set ProcessInformation
-	to -1 if the process is being debugged
+NtQueryInformationProcess called with
+ProcessDebugPort will set ProcessInformation
+to -1 if the process is being debugged
 
-	Note: NtQueryInformationProcess may be
-	unreliable as it is susceptible to change
+Note: NtQueryInformationProcess may be
+unreliable as it is susceptible to change
 */
 static BOOL MyNtQueryInformationProcess(VOID) {
 	/*
-		Dynamically load the function since it's
-		only available with this method (AFAIK)
+	Dynamically load the function since it's
+	only available with this method (AFAIK)
 	*/
 	typedef NTSTATUS(NTAPI *pfnNtQueryInformationProcess)(HANDLE, PROCESS_INFORMATION_CLASS, PVOID, ULONG, PULONG);
 	pfnNtQueryInformationProcess fnNtQueryInformationProcess = (pfnNtQueryInformationProcess)GetProcAddress(LoadLibrary("ntdll"), "NtQueryInformationProcess");
@@ -326,15 +438,15 @@ static BOOL MyNtQueryInformationProcess(VOID) {
 }
 
 /*
-	NtSetInformationThread called with
-	ThreadInformationClass set to 0x11
-	(ThreadHideFromDebugger constant), the
-	thread will be detached from the debugger
+NtSetInformationThread called with
+ThreadInformationClass set to 0x11
+(ThreadHideFromDebugger constant), the
+thread will be detached from the debugger
 */
 static BOOL MyNtSetInformationThread(VOID) {
 	/*
-		Dynamically load the function since it's
-		only available with this method (AFAIK)
+	Dynamically load the function since it's
+	only available with this method (AFAIK)
 	*/
 	typedef NTSTATUS(NTAPI *pfnNtSetInformationProcess)(HANDLE, THREAD_INFORMATION_CLASS, PVOID, ULONG);
 	pfnNtSetInformationProcess fnNtSetInformationProcess = (pfnNtSetInformationProcess)GetProcAddress(LoadLibrary("ntdll"), "NtSetInformationThread");
@@ -351,9 +463,9 @@ static BOOL MyNtSetInformationThread(VOID) {
 }
 
 /*
-	Calling CloseHandle on an invalid handle
-	when the process is being debugged will
-	throw a STATUS_INVALID_HANDLE exception
+Calling CloseHandle on an invalid handle
+when the process is being debugged will
+throw a STATUS_INVALID_HANDLE exception
 */
 static BOOL MyCloseHandle(HANDLE h) {
 	__try {
@@ -367,7 +479,7 @@ static BOOL MyCloseHandle(HANDLE h) {
 }
 
 /*
-	Win2K and WinXP only
+Win2K and WinXP only
 */
 static BOOL MyOutputDebugString(VOID) {
 	DWORD dwError = 0x1337;
@@ -381,10 +493,10 @@ static BOOL MyOutputDebugString(VOID) {
 }
 
 /*
-	If the process is being debugged and the int 
-	2Dh instruction is executed with the trace 
-	flag, no exception will be generated the following 
-	byte will be skipped and execution will continue
+If the process is being debugged and the int
+2Dh instruction is executed with the trace
+flag, no exception will be generated the following
+byte will be skipped and execution will continue
 */
 static BOOL CheckInt2D(VOID) {
 	__try {
@@ -392,7 +504,8 @@ static BOOL CheckInt2D(VOID) {
 			int 0x2D
 			mov eax, 1    // anti-trace
 		}
-	} __except (EXCEPTION_EXECUTE_HANDLER) {
+	}
+	__except (EXCEPTION_EXECUTE_HANDLER) {
 		return FALSE;     // process not being debugged
 	}
 
@@ -400,10 +513,10 @@ static BOOL CheckInt2D(VOID) {
 }
 
 /*
-	Uses precision timer to calculate the delta
-	time between intructions. By raising an exception, 
-	it forces extra time onto the debugging process
-	hence creating a larger delta
+Uses precision timer to calculate the delta
+time between intructions. By raising an exception,
+it forces extra time onto the debugging process
+hence creating a larger delta
 */
 static BOOL RdtscTimer(DWORD dwTimeThreshold) {
 	DWORD64 dwInitialTime = 0;
@@ -414,7 +527,8 @@ static BOOL RdtscTimer(DWORD dwTimeThreshold) {
 			xor eax, eax
 			div eax
 		}
-	} __except (EXCEPTION_EXECUTE_HANDLER) {
+	}
+	__except (EXCEPTION_EXECUTE_HANDLER) {
 		// do nothing
 	}
 
@@ -424,10 +538,11 @@ static BOOL RdtscTimer(DWORD dwTimeThreshold) {
 		return TRUE;
 }
 
+#ifdef FIND_WINDOW_NAMES
 /*
-	Enumerates all windows and checks all window names 
-	for any of the pre-defined strings declared above. 
-	Returns TRUE if one exists, else FALSE
+Enumerates all windows and checks all window names
+for any of the pre-defined strings declared above.
+Returns TRUE if one exists, else FALSE
 */
 static BOOL CALLBACK EnumWindowsProc(HWND hWnd, LPARAM lParam) {
 	CHAR szWindowText[MAX_PATH];
@@ -453,7 +568,7 @@ static BOOL CALLBACK EnumWindowsProc(HWND hWnd, LPARAM lParam) {
 }
 
 /*
-	Starts a window enumeration
+Starts a window enumeration
 */
 static BOOL CheckWindowNames(VOID) {
 	BOOL bResult = FALSE;
@@ -461,6 +576,7 @@ static BOOL CheckWindowNames(VOID) {
 
 	return bResult;
 }
+#endif
 
 // multithread this on an infinite loop?
 // only 32-bit processes
@@ -476,8 +592,8 @@ static BOOL CheckProcessNames(VOID) {
 	if (Process32First(hSnapshot, lppe) == TRUE) {
 		StringToLowerCase(szLowerCase, lppe->szExeFile);
 		//Debug("Original process: %s\nLowercased: %s", lppe->szExeFile, szLowerCase);
-		bResult = CheckProcessName(szLowerCase, DebuggerNames, 5) | 
-				CheckProcessName(szLowerCase, MonitoringToolNames, 4);
+		bResult = CheckProcessName(szLowerCase, DebuggerNames, 5) |
+			CheckProcessName(szLowerCase, MonitoringToolNames, 4);
 		if (bResult == TRUE) {
 			free(lppe);
 			CloseHandle(hSnapshot);
@@ -486,12 +602,12 @@ static BOOL CheckProcessNames(VOID) {
 	}
 
 	while (Process32Next(hSnapshot, lppe) == TRUE) {
-			StringToLowerCase(szLowerCase, lppe->szExeFile);
-			//Debug("Original process: %s\nLowercased: %s", lppe->szExeFile, szLowerCase);
-			bResult = CheckProcessName(szLowerCase, DebuggerNames, 5) | 
-					CheckProcessName(szLowerCase, MonitoringToolNames, 4);
-			if (bResult == TRUE)
-				break;
+		StringToLowerCase(szLowerCase, lppe->szExeFile);
+		//Debug("Original process: %s\nLowercased: %s", lppe->szExeFile, szLowerCase);
+		bResult = CheckProcessName(szLowerCase, DebuggerNames, 5) |
+			CheckProcessName(szLowerCase, MonitoringToolNames, 4);
+		if (bResult == TRUE)
+			break;
 	}
 
 	free(lppe);
@@ -504,7 +620,7 @@ static BOOL CheckProcessNames(VOID) {
 BOOL CheckForDebuggers(VOID) {
 	BOOL bResult = FALSE;
 
-#ifdef FIND_DEBUG_WINDOW_NAMES
+#ifdef FIND_WINDOW_NAMES
 	// windows with names of debuggers
 	bResult |= CheckWindowNames();
 #endif
@@ -535,10 +651,10 @@ BOOL CheckForDebuggers(VOID) {
 	// heap flags
 
 	// OutputDebugString
-	if ((IsWindowsXPOrGreater() || 
-		IsWindowsXPSP1OrGreater() || 
-		IsWindowsXPSP2OrGreater() || 
-		IsWindowsXPSP3OrGreater()) && 
+	if ((IsWindowsXPOrGreater() ||
+		IsWindowsXPSP1OrGreater() ||
+		IsWindowsXPSP2OrGreater() ||
+		IsWindowsXPSP3OrGreater()) &&
 		!IsWindowsVistaOrGreater()) {
 		bResult |= MyOutputDebugString();
 	}

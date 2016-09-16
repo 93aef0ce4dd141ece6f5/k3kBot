@@ -9,8 +9,6 @@
 #define DISABLE_TASK_MGR
 #define DISABLE_CMD
 
-#define NAME "Trojan"
-
-//VOID Debug(LPSTR, ...);
+#define NAME "k3kBot"
 
 #endif // !MAIN_H
